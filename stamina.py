@@ -3,7 +3,8 @@
 1走ごとに「補正後のペースが、そのコースの基準より 1000m あたり何秒速かったか」（rel）を出す。
 若いうちの走りは、年齢区分の差（成長分）を差し引いておく。
 
-- 今の速さ: rel の重み付き平均。近い時期のレースほど重く数える（半年で重さが半分）。
+- 今の速さ: 直近 RECENT 走のうち良かった BEST 走の rel の平均。
+  ペースの遅い下級条件では力を出し切らないことが多く、全走の平均だと実力より低く出る。
 - スタミナ: クラス差も差し引いた rel を距離（対数）に対して直線で当てはめた傾き。
   長い距離はキャリアの後半・上のクラスで走ることが多いので、クラス差を残すと
   「成長して強くなった」ことまで「距離が延びて強くなった」ように見えてしまう。
@@ -18,7 +19,6 @@
     data/<race_id>/stamina.csv
 """
 import csv
-import datetime
 import math
 import os
 import re
@@ -26,7 +26,7 @@ import sys
 
 import numpy as np
 
-HALF_LIFE_DAYS = 180
+RECENT, BEST = 4, 2
 REF_DISTANCE = 2000  # 傾きの基準にする距離
 MIN_TAU2 = 0.05  # 馬ごとの傾きの差の下限（0 にすると全馬が同じスタミナになる）
 
@@ -53,16 +53,14 @@ def main(race_id, target_course, target_age):
     target_distance = int(re.search(r"(\d{4})$", target_course).group(1))
     target_base = base[target_course]
     x_target = math.log(target_distance / REF_DISTANCE)
-    today = max(datetime.date.fromisoformat(r["date"].replace("/", "-")) for r in runs)
 
     horses = {}
     for r in runs:
         rel = kmh(float(r["corrected_kmh"])) - effects.get(("age", r["age"]), 0.0) - base[r["course"]]
-        days = (today - datetime.date.fromisoformat(r["date"].replace("/", "-"))).days
         horses.setdefault(r["name"], []).append({
             "x": math.log(int(r["distance"]) / REF_DISTANCE), "distance": int(r["distance"]),
             "rel": rel, "rel_class": rel - effects.get(("level", r["level"]), 0.0),
-            "w": 0.5 ** (days / HALF_LIFE_DAYS),
+            "date": r["date"],
         })
 
     # 1. 馬ごとに、クラス差を除いた rel を距離に対して直線で当てはめる
@@ -92,10 +90,11 @@ def main(race_id, target_course, target_age):
         trust = tau2 / (tau2 + f["var_b"]) if f["sxx"] > 0 else 0.0
         b = f["slope"] * trust
         var_b = tau2 * (1 - trust)
-        w = np.array([r["w"] for r in rows])
-        xm = float(np.average([r["x"] for r in rows], weights=w))
-        level = float(np.average([r["rel"] for r in rows], weights=w))  # 今の速さ（距離 xm での rel）
-        var_level = sigma2 * float(np.sum(w ** 2) / np.sum(w) ** 2)
+        recent = sorted(rows, key=lambda r: r["date"], reverse=True)[:RECENT]
+        best = sorted(recent, key=lambda r: r["rel"])[:BEST]
+        xm = float(np.mean([r["x"] for r in best]))
+        level = float(np.mean([r["rel"] for r in best]))  # 今の速さ（距離 xm での rel）
+        var_level = sigma2 / len(best)
         dx = x_target - xm
         rel_target = level + b * dx
         sd = math.sqrt(var_level + dx ** 2 * var_b)
