@@ -58,9 +58,9 @@ def entries(race_id):
     horses = []
     for tr in re.findall(r'<tr class="HorseList.*?</tr>', s, re.S):
         h = re.search(r'horse/(\d+)"[^>]*>([^<]*)', tr)
-        j = re.search(r'jockey/result/recent/\d+/"[^>]*>\s*([^<]*)', tr)
+        j = re.search(r'jockey/result/recent/(\w+)/"[^>]*>\s*([^<]*)', tr)
         horses.append({"horse_id": h.group(1), "name": h.group(2).strip(),
-                       "jockey": j.group(1).strip() if j else ""})
+                       "jockey": j.group(2).strip() if j else "", "jockey_id": j.group(1) if j else ""})
     return title, horses
 
 
@@ -178,3 +178,22 @@ def win_odds(race_id):
         if int(k) in number and re.fullmatch(r"\d+(\.\d+)?", v[0]):
             odds[number[int(k)]] = float(v[0])
     return odds, data.get("status", "")
+
+
+def race_runs(race_id):
+    """レース結果の全出走馬の走り。タイムのない馬は除く。"""
+    s = get(f"https://db.netkeiba.com/race/{race_id}/", "euc-jp", cache=True)
+    table = re.search(r'<table[^>]*race_table_01.*?</table>', s, re.S)
+    if not table:
+        return []
+    runs = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(0), re.S)[1:]:
+        horse = re.search(r'/horse/(\w{10})/"', tr)
+        jockey = re.search(r'/jockey/result/recent/(\w+)/"[^>]*>([^<]*)', tr)
+        cells = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
+        sec = to_seconds(cells[7]) if len(cells) > 7 else None
+        if horse and jockey and sec is not None and re.fullmatch(r"\d+(\.\d+)?", cells[5]):
+            runs.append({"horse_id": horse.group(1), "jockey_id": jockey.group(1),
+                         "jockey": jockey.group(2).strip(), "weight": float(cells[5]),
+                         "finish": cells[0], "time": sec})
+    return runs
