@@ -194,7 +194,13 @@ def race_runs(race_id):
         sec = to_seconds(cells[7]) if len(cells) > 7 else None
         if horse and jockey and sec is not None and re.fullmatch(r"\d+(\.\d+)?", cells[5]):
             odds = float(cells[16]) if len(cells) > 16 and re.fullmatch(r"\d+(\.\d+)?", cells[16]) else None
+            body = re.fullmatch(r"(\d+)\(([+-]?\d+)\)", cells[18]) if len(cells) > 18 else None
             runs.append({"horse_id": horse.group(1), "jockey_id": jockey.group(1),
                          "jockey": jockey.group(2).strip(), "weight": float(cells[5]),
-                         "finish": cells[0], "time": sec, "odds": odds})
+                         "finish": cells[0], "time": sec, "odds": odds,
+                         "number": int(cells[2]) if cells[2].isdigit() else None,
+                         "passing": [int(p) for p in cells[14].split("-") if p.isdigit()] if len(cells) > 14 else [],
+                         "last600": float(cells[15]) if len(cells) > 15 and re.fullmatch(r"\d+\.\d", cells[15]) else None,
+                         "body": int(body.group(1)) if body else None,
+                         "body_change": int(body.group(2)) if body else None})
     return runs
