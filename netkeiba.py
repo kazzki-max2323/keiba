@@ -144,7 +144,7 @@ def race_result(race_id):
 
 
 def race_runners(race_id):
-    """レース結果の全出走馬の (馬ID, 馬名, 着順, 走破タイム秒)。タイムのない馬は除く。"""
+    """レース結果の全出走馬の (馬ID, 馬名, 着順, 走破タイム秒, 単勝オッズ)。タイムのない馬は除く。"""
     s = get(f"https://db.netkeiba.com/race/{race_id}/", "euc-jp", cache=True)
     table = re.search(r'<table[^>]*race_table_01.*?</table>', s, re.S)
     runners = []
@@ -153,5 +153,6 @@ def race_runners(race_id):
         cells = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
         sec = to_seconds(cells[7]) if len(cells) > 7 else None
         if horse and sec is not None:
-            runners.append((horse.group(1), horse.group(2).strip(), cells[0], sec))
+            odds = float(cells[16]) if re.fullmatch(r"\d+(\.\d+)?", cells[16]) else None
+            runners.append((horse.group(1), horse.group(2).strip(), cells[0], sec, odds))
     return runners

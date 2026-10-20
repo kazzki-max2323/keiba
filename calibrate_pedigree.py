@@ -56,7 +56,7 @@ def collect(base, effects):
     for race_id in PAST_RACES:
         runners = netkeiba.race_runners(race_id)
         print(f"{race_id}: {len(runners)}頭", flush=True)
-        for horse_id, name, finish, sec in runners:
+        for horse_id, name, finish, sec, odds in runners:
             birth = int(horse_id[:4])
             history = netkeiba.horse_results(horse_id, cache=True)
             own = next((r for r in history if r["race_id"] == race_id), None)
@@ -76,7 +76,7 @@ def collect(base, effects):
                 continue
             best = sorted(prior[:RECENT], key=lambda p: p[1])[:BEST]
             rows.append({
-                "year": own["date"][:4], "name": name, "finish": finish,
+                "year": own["date"][:4], "race_id": race_id, "name": name, "finish": finish, "odds": odds,
                 "level": round(float(np.mean([p[1] for p in best])), 3),
                 "rel_kikka": round(rel(sec / 3, birth, own["date"], effects, base[TARGET_COURSE]), 3),
                 "longest_before": max(p[2] for p in prior),
@@ -101,7 +101,7 @@ def fit(rows):
         w = np.minimum(1.0, 1.345 * scale / np.maximum(np.abs(resid), 1e-9))
     sigma2 = np.sum(w * resid ** 2) / (len(y) - X.shape[1])
     cov = sigma2 * np.linalg.inv(X.T @ (w[:, None] * X))
-    return coef, np.sqrt(np.diag(cov)), years, scale
+    return coef, np.sqrt(np.diag(cov)), years, scale, resid
 
 
 def main(race_id):
@@ -114,7 +114,7 @@ def main(race_id):
         w.writeheader()
         w.writerows(rows)
 
-    coef, se, years, scale = fit(rows)
+    coef, se, years, scale, _ = fit(rows)
     names = ["pedigree_per_100m", "level"] + [f"year_{y}" for y in years]
     with open(os.path.join(out, "pedigree_weight.csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
