@@ -10,8 +10,7 @@
 - その日のぶれは、過去の菊花賞で実際に出た「予想からのずれ」（大敗も含む）から無作為に取る。
 - 調子のブレの大きさは variability.csv の factor（平均的な馬 = 1）。
 
-今年の「今の速さ」は馬場差を補正してあるので、補正していない過去の値よりぶれが小さい。
-その分 c は過去の値より大きくなる（ばらつきの比で直す）。
+過去の出走馬の「今の速さ」も今年と同じく馬場差を補正してあるので、c はそのまま使う。
 
 過去の菊花賞で、その年を除いたデータで作ったモデルに予想させ、実際の結果と比べる（答え合わせ）。
 比べる相手は、単勝オッズから出した確率と、全馬同じ確率。
@@ -95,6 +94,14 @@ def score(bt):
         blend += [math.log(p) for r, p in zip(rs, raw) if r["finish"] == "1"]
     res["blend_win"] = float(np.mean(blend))
     res["model_top3_brier"] = float(np.mean([(r["model_top3"] - (r["finish"] in ("1", "2", "3"))) ** 2 for r in bt]))
+    for k, key in (("model_rank_corr", "model_win"), ("market_rank_corr", "market_win")):
+        corrs = []
+        for rs in by_year.values():
+            rs = [r for r in rs if r["finish"].isdigit()]
+            pred = np.argsort(np.argsort([-r[key] for r in rs]))
+            actual = np.argsort(np.argsort([int(r["finish"]) for r in rs]))
+            corrs.append(np.corrcoef(pred, actual)[0, 1])
+        res[k] = float(np.mean(corrs))
     res["uniform_top3_brier"] = float(np.mean([(3 / 18 - (r["finish"] in ("1", "2", "3"))) ** 2 for r in bt]))
     return res, winners
 
@@ -118,6 +125,8 @@ def main(race_id):
     for k in ("uniform_win", "model_win", "market_win", "blend_win"):
         print(f"  {k:12s} {res[k]:+.3f}  （平均すると勝ち馬に {math.exp(res[k]):.1%} を付けた）")
     print(f"  3着以内のブライアスコア: モデル {res['model_top3_brier']:.4f} / 全馬同じ {res['uniform_top3_brier']:.4f}")
+    print("  着順との順位相関（年ごと、1 に近いほど着順を当てている）:")
+    print(f"    モデル {res['model_rank_corr']:+.3f}   オッズ {res['market_rank_corr']:+.3f}")
     for r in winners:
         print(f"    {r['year']} {r['name']}: モデル {r['model_win']:.1%}  オッズ {r['market_win']:.1%}")
 
@@ -135,8 +144,6 @@ def main(race_id):
                       for n in names])
     ped = np.array([(float(st[n]["pedigree_distance"]) - PED_CENTER) / 100 for n in names])
     factor = np.array([var.get(n, 1.0) for n in names])
-    ratio = np.var([r["level"] for r in rows]) / np.var(level)  # 補正していない値と補正済みの値のばらつきの比
-    m["c"], m["c_se"] = m["c"] * ratio, m["c_se"] * ratio
     print(f"\n今の速さを信じる度合い c = {m['c']:.2f} ± {m['c_se']:.2f}  血統 p = {m['p']:+.3f} ± {m['p_se']:.3f}")
     print(f"その日のぶれ（菊花賞）: 標準偏差 ±{np.std(m['noise']):.2f}秒/1000m（3000mで ±{3 * np.std(m['noise']):.1f}秒）"
           f"  1000mあたり1秒以上の大敗 {np.mean(m['noise'] > 1.0):.0%}")
