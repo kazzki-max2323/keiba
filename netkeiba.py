@@ -156,3 +156,25 @@ def race_runners(race_id):
             odds = float(cells[16]) if re.fullmatch(r"\d+(\.\d+)?", cells[16]) else None
             runners.append((horse.group(1), horse.group(2).strip(), cells[0], sec, odds))
     return runners
+
+
+def win_odds(race_id):
+    """単勝オッズ {馬名: オッズ} と状態（"yoso" = netkeiba の予想オッズ、"middle" = 発売中、"result" = 確定）。
+
+    枠順が決まる前は馬番がないので、出馬表の並びの番号（odds-1_番号）で馬名と対応させる。
+    """
+    import json
+    s = get(f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id}", "utf-8")
+    number = {}
+    for tr in re.findall(r'<tr class="HorseList.*?</tr>', s, re.S):
+        name = re.search(r'horse/\d+"[^>]*>([^<]*)', tr).group(1).strip()
+        n = re.search(r'id="odds-1_(\d+)"', tr)
+        if n:
+            number[int(n.group(1))] = name
+    data = json.loads(get(f"https://race.netkeiba.com/api/api_get_jra_odds.html?race_id={race_id}&type=1&action=init",
+                          "utf-8"))
+    odds = {}
+    for k, v in ((data.get("data") or {}).get("odds") or {}).get("1", {}).items():
+        if int(k) in number and re.fullmatch(r"\d+(\.\d+)?", v[0]):
+            odds[number[int(k)]] = float(v[0])
+    return odds, data.get("status", "")
