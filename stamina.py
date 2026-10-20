@@ -12,6 +12,9 @@
 走った回数が少ない・距離の幅が狭い馬の傾きはぶれやすいので、
 全馬の傾きのばらつきから「どの程度信じてよいか」を見積もり、平均的な馬（傾き 0）の方へ寄せる。
 
+pedigree.csv と pedigree_weight.csv（calibrate_pedigree.py の結果）があれば、
+血統の距離による上乗せも加える。上乗せは、過去の出走馬の血統の距離の平均を 0 とする。
+
 使い方:
     python3 stamina.py 202608040911 京都芝外3000 3歳   # 先に correct_speed.py を実行しておく
 
@@ -50,6 +53,14 @@ def main(race_id, target_course, target_age):
     runs = read(os.path.join(out, "runs_corrected.csv"))
     base = {b["course"]: float(b["baseline_sec_per_1000m"]) for b in read(os.path.join(out, "baseline.csv"))}
     effects = {(e["kind"], e["key"]): float(e["sec_per_1000m"]) for e in read(os.path.join(out, "effects.csv"))}
+    ped = {}
+    if os.path.exists(os.path.join(out, "pedigree_weight.csv")):
+        weight = {w["term"]: w for w in read(os.path.join(out, "pedigree_weight.csv"))}
+        ped_coef = float(weight["pedigree_per_100m"]["sec_per_1000m"])
+        ped_se = float(weight["pedigree_per_100m"]["se"])
+        ped_center = np.mean([float(c["pedigree_distance"])
+                              for c in read(os.path.join(out, "pedigree_calibration.csv"))])
+        ped = {p["name"]: float(p["pedigree_distance"]) for p in read(os.path.join(out, "pedigree.csv"))}
     target_distance = int(re.search(r"(\d{4})$", target_course).group(1))
     target_base = base[target_course]
     x_target = math.log(target_distance / REF_DISTANCE)
@@ -97,7 +108,14 @@ def main(race_id, target_course, target_age):
         var_level = sigma2 / len(best)
         dx = x_target - xm
         rel_target = level + b * dx
-        sd = math.sqrt(var_level + dx ** 2 * var_b)
+        var_target = var_level + dx ** 2 * var_b
+        ped_adj = 0.0
+        if name in ped:
+            units = (ped[name] - ped_center) / 100
+            ped_adj = ped_coef * units
+            var_target += (ped_se * units) ** 2
+        rel_target += ped_adj
+        sd = math.sqrt(var_target)
         pace = target_base + rel_target + effects[("age", target_age)]
         rows_out.append({
             "name": name, "turf_runs": len(rows), "longest": max(r["distance"] for r in rows),
@@ -108,6 +126,8 @@ def main(race_id, target_course, target_age):
             "stamina_kmh": round(kmh(target_base + b * math.log(1.5)) - kmh(target_base), 2),
             "stamina_raw_kmh": round(kmh(target_base + f["slope"] * math.log(1.5)) - kmh(target_base), 2),
             "trust": round(trust, 2),
+            "pedigree_distance": round(ped[name]) if name in ped else "",
+            "pedigree_adj_kmh": round(kmh(target_base + ped_adj) - kmh(target_base), 2),
             "pred_vs_baseline_kmh": round(kmh(target_base + rel_target) - kmh(target_base), 2),
             "pred_kmh": round(kmh(pace), 2),
             "pred_kmh_low": round(kmh(pace + sd), 2), "pred_kmh_high": round(kmh(pace - sd), 2),
