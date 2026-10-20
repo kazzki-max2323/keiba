@@ -64,9 +64,9 @@ def entries(race_id):
     return title, horses
 
 
-def horse_results(horse_id):
+def horse_results(horse_id, cache=False):
     """馬の全成績。中止・除外などタイムのない走は除く。"""
-    s = get(f"https://db.netkeiba.com/horse/result/{horse_id}/", "euc-jp")
+    s = get(f"https://db.netkeiba.com/horse/result/{horse_id}/", "euc-jp", cache=cache)
     table = re.search(r'<table[^>]*db_h_race_results.*?</table>', s, re.S)
     if not table:
         return []
@@ -141,3 +141,17 @@ def race_result(race_id):
     return {"race_id": race_id, "name": name, "surface": course.group(1),
             "distance": int(course.group(3)), "inout": "外" if "外" in course.group(2) else "", "going": going.group(1) if going else "",
             "level": level, "age": age, "win_time": sec}
+
+
+def race_runners(race_id):
+    """レース結果の全出走馬の (馬ID, 馬名, 着順, 走破タイム秒)。タイムのない馬は除く。"""
+    s = get(f"https://db.netkeiba.com/race/{race_id}/", "euc-jp", cache=True)
+    table = re.search(r'<table[^>]*race_table_01.*?</table>', s, re.S)
+    runners = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(0), re.S)[1:]:
+        horse = re.search(r'/horse/(\w{10})/"[^>]*>([^<]*)', tr)
+        cells = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
+        sec = to_seconds(cells[7]) if len(cells) > 7 else None
+        if horse and sec is not None:
+            runners.append((horse.group(1), horse.group(2).strip(), cells[0], sec))
+    return runners

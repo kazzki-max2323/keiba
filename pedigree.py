@@ -55,22 +55,25 @@ def shrink(wins, dist):
     return (wins * dist + PRIOR_WINS * PRIOR_DISTANCE) / (wins + PRIOR_WINS)
 
 
+def pedigree(horse_id):
+    sire_id, sire, damsire_id, damsire = parents(horse_id)
+    sw, sd = sire_distance(sire_id)
+    dw, dd = sire_distance(damsire_id)
+    return {
+        "sire": sire, "sire_turf_wins": sw, "sire_avg_turf_distance": sd or "",
+        "damsire": damsire, "damsire_turf_wins": dw, "damsire_avg_turf_distance": dd or "",
+        # 父を2、母の父を1の重みで合わせた血統の距離（勝利数の少ない種牡馬は平均へ寄せた後の値）
+        "pedigree_distance": round((2 * shrink(sw, sd) + shrink(dw, dd)) / 3),
+    }
+
+
 def main(race_id):
     out = os.path.join("data", race_id)
     with open(os.path.join(out, "runs.csv"), encoding="utf-8-sig") as f:
         horses = {r["horse_id"]: r["name"] for r in csv.DictReader(f)}
     rows = []
     for horse_id, name in horses.items():
-        sire_id, sire, damsire_id, damsire = parents(horse_id)
-        sw, sd = sire_distance(sire_id)
-        dw, dd = sire_distance(damsire_id)
-        s_adj, d_adj = shrink(sw, sd), shrink(dw, dd)
-        rows.append({
-            "name": name, "sire": sire, "sire_turf_wins": sw, "sire_avg_turf_distance": sd or "",
-            "damsire": damsire, "damsire_turf_wins": dw, "damsire_avg_turf_distance": dd or "",
-            # 父を2、母の父を1の重みで合わせた血統の距離（勝利数の少ない種牡馬は平均へ寄せた後の値）
-            "pedigree_distance": round((2 * s_adj + d_adj) / 3),
-        })
+        rows.append({"name": name, **pedigree(horse_id)})
         print(rows[-1], flush=True)
     rows.sort(key=lambda r: -r["pedigree_distance"])
     with open(os.path.join(out, "pedigree.csv"), "w", newline="", encoding="utf-8-sig") as f:
