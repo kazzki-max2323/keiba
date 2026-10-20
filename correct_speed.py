@@ -11,6 +11,7 @@
 
 使い方:
     python3 correct_speed.py 202608040911   # 先に fetch_race.py を実行しておく
+    python3 correct_speed.py 202608040911 08:20241020,08:20231022   # 基準を固めたい開催日を足す
 
 出力:
     data/<race_id>/runs_corrected.csv     1走ごとの補正後の値
@@ -29,10 +30,10 @@ import netkeiba
 REF_LEVEL, REF_AGE = "1勝", "3歳以上"
 
 
-def collect(runs):
-    """馬が走った日・競馬場の芝レースの結果をすべて集める。"""
+def collect(runs, extra_days=()):
+    """馬が走った日・競馬場の芝レースの結果をすべて集める。extra_days は (競馬場コード, YYYYMMDD) の追加分。"""
     days = sorted({(r["race_id"][4:6], r["date"].replace("/", "")) for r in runs
-                   if r["surface"] == "芝" and r["race_id"][4:6] in netkeiba.VENUES})
+                   if r["surface"] == "芝" and r["race_id"][4:6] in netkeiba.VENUES} | set(extra_days))
     races = []
     for i, (venue, date) in enumerate(days, 1):
         targets = [rid for rid, surface, _ in netkeiba.day_races(date)
@@ -88,7 +89,7 @@ def fit(races, iterations=200):
     return base, day, level, age
 
 
-def main(race_id):
+def main(race_id, extra_days=()):
     out = os.path.join("data", race_id)
     with open(os.path.join(out, "runs.csv"), encoding="utf-8-sig") as f:
         runs = list(csv.DictReader(f))
@@ -96,7 +97,7 @@ def main(race_id):
         r["distance"] = int(r["distance"])
 
     print("同じ日の芝レースを集めています…")
-    races = collect(runs)
+    races = collect(runs, extra_days)
     base, day, level, age = fit(races)
     counts = collections.Counter(r["course"] for r in races)
     by_id = {r["race_id"]: r for r in races}
@@ -114,7 +115,9 @@ def main(race_id):
         pace = sec / r["distance"] * 1000
         adj_pace = pace - day[key_day]
         corrected.append({
-            "name": r["name"], "date": r["date"], "race": r["race"], "course": f"{venue}芝{key_course[1]}{r['distance']}",
+            "name": r["name"], "race_id": r["race_id"], "date": r["date"], "race": r["race"],
+            "course": f"{venue}芝{key_course[1]}{r['distance']}", "distance": r["distance"],
+            "level": own["level"] if own else "", "age": own["age"] if own else "",
             "going": r["going"], "finish": r["finish"], "jockey": r["jockey"], "time": r["time"],
             "speed_kmh": r["speed_kmh"],
             "day_variant_sec_per_1000m": round(day[key_day], 2),
@@ -155,6 +158,8 @@ def main(race_id):
     write("baseline.csv", [{"course": f"{v}芝{io}{d}", "races": counts[(v, io, d)],
                             "baseline_sec_per_1000m": round(p, 2), "baseline_kmh": round(3600 / p, 2)}
                            for (v, io, d), p in sorted(base.items())])
+    write("effects.csv", [{"kind": "level", "key": k, "sec_per_1000m": round(v, 3)} for k, v in level.items()]
+          + [{"kind": "age", "key": k, "sec_per_1000m": round(v, 3)} for k, v in age.items()])
     write("day_variants.csv", [{"date": d, "venue": v, "going": g, "sec_per_1000m": round(x, 2)}
                                for (d, v, g), x in sorted(day.items())])
     print("クラス差（秒/1000m、マイナスほど速い）:", {k: round(v, 2) for k, v in sorted(level.items(), key=lambda x: x[1])})
@@ -163,4 +168,6 @@ def main(race_id):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    # 追加の開催日は「競馬場コード:YYYYMMDD」をカンマ区切りで渡す（例: 08:20241020,08:20231022）
+    extra = [tuple(x.split(":")) for x in sys.argv[2].split(",")] if len(sys.argv) > 2 else []
+    main(sys.argv[1], extra)
