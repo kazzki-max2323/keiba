@@ -193,7 +193,8 @@ def race_runs(race_id):
         cells = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
         sec = to_seconds(cells[7]) if len(cells) > 7 else None
         if horse and jockey and sec is not None and re.fullmatch(r"\d+(\.\d+)?", cells[5]):
+            odds = float(cells[16]) if len(cells) > 16 and re.fullmatch(r"\d+(\.\d+)?", cells[16]) else None
             runs.append({"horse_id": horse.group(1), "jockey_id": jockey.group(1),
                          "jockey": jockey.group(2).strip(), "weight": float(cells[5]),
-                         "finish": cells[0], "time": sec})
+                         "finish": cells[0], "time": sec, "odds": odds})
     return runs
