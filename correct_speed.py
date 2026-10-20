@@ -50,7 +50,7 @@ def fit(races, iterations=200):
     """ペースを基準・馬場差・クラス差・年齢差に分ける（交互に平均を取って合わせる）。"""
     for r in races:
         r["pace"] = r["win_time"] / r["distance"] * 1000
-        r["course"] = (r["venue"], r["distance"])
+        r["course"] = (r["venue"], r["inout"], r["distance"])
         r["day"] = (r["date"], r["venue"], r["going"])
     base = collections.defaultdict(float)
     day = collections.defaultdict(float)
@@ -99,19 +99,22 @@ def main(race_id):
     races = collect(runs)
     base, day, level, age = fit(races)
     counts = collections.Counter(r["course"] for r in races)
+    by_id = {r["race_id"]: r for r in races}
 
     corrected = []
     for r in runs:
         venue = netkeiba.VENUES.get(r["race_id"][4:6])
         sec = netkeiba.to_seconds(r["time"])
         going = {"稍": "稍重", "不": "不良"}.get(r["going"], r["going"])
-        key_day, key_course = (r["date"].replace("/", ""), venue, going), (venue, r["distance"])
+        key_day = (r["date"].replace("/", ""), venue, going)
+        own = by_id.get(r["race_id"])  # 内回り・外回りは、その馬が走ったレース自体から判定する
+        key_course = own["course"] if own else (venue, "", r["distance"])
         if r["surface"] != "芝" or key_day not in day or key_course not in base:
             continue
         pace = sec / r["distance"] * 1000
         adj_pace = pace - day[key_day]
         corrected.append({
-            "name": r["name"], "date": r["date"], "race": r["race"], "course": f"{venue}芝{r['distance']}",
+            "name": r["name"], "date": r["date"], "race": r["race"], "course": f"{venue}芝{key_course[1]}{r['distance']}",
             "going": r["going"], "finish": r["finish"], "jockey": r["jockey"], "time": r["time"],
             "speed_kmh": r["speed_kmh"],
             "day_variant_sec_per_1000m": round(day[key_day], 2),
@@ -149,9 +152,9 @@ def main(race_id):
 
     write("runs_corrected.csv", corrected)
     write("summary_corrected.csv", summary)
-    write("baseline.csv", [{"course": f"{v}芝{d}", "races": counts[(v, d)],
+    write("baseline.csv", [{"course": f"{v}芝{io}{d}", "races": counts[(v, io, d)],
                             "baseline_sec_per_1000m": round(p, 2), "baseline_kmh": round(3600 / p, 2)}
-                           for (v, d), p in sorted(base.items())])
+                           for (v, io, d), p in sorted(base.items())])
     write("day_variants.csv", [{"date": d, "venue": v, "going": g, "sec_per_1000m": round(x, 2)}
                                for (d, v, g), x in sorted(day.items())])
     print("クラス差（秒/1000m、マイナスほど速い）:", {k: round(v, 2) for k, v in sorted(level.items(), key=lambda x: x[1])})

@@ -130,7 +130,7 @@ def race_result(race_id):
         return None
     head_txt = text(head.group(0))
     name = text(re.search(r"<h1>(.*?)</h1>", head.group(0), re.S).group(1))
-    course = re.search(r"(芝|ダ|障)\S*?(\d{3,4})m", head_txt)
+    course = re.search(r"(芝|ダ|障)([^/\d]*?)(\d{3,4})m", head_txt)
     going = re.search(r"(?:芝|ダート)\s*:\s*(良|稍重|重|不良)", head_txt)
     first = re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(0), re.S)[1]
     cells = [text(x) for x in re.findall(r"<td[^>]*>(.*?)</td>", first, re.S)]
@@ -139,5 +139,5 @@ def race_result(race_id):
         return None
     level, age = race_level(name, text(small.group(1)))
     return {"race_id": race_id, "name": name, "surface": course.group(1),
-            "distance": int(course.group(2)), "going": going.group(1) if going else "",
+            "distance": int(course.group(3)), "inout": "外" if "外" in course.group(2) else "", "going": going.group(1) if going else "",
             "level": level, "age": age, "win_time": sec}
