@@ -1,2 +1,4 @@
 data/cache/
 __pycache__/
+data/*/calendar_days.txt
+data/*/all_days.txt
