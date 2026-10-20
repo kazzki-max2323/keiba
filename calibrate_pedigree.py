@@ -6,12 +6,14 @@
 を出し、本番で「今の速さ」からどれだけ上下したか (y = rel_k - level) を血統の距離で説明する。
 rel は「そのコース・距離の基準ペースより 1000m あたり何秒遅いか」（マイナスほど速い）。
 
-古い年は出走前のレースの馬場差まで集めると時間がかかりすぎるので、ここでは馬場差を補正しない。
-馬場の良し悪しは血統と関係がないので、ぶれは増えるが偏りは生まない。
-年ごとの馬場の速さの違い（芝の高速化など）は、年ごとの定数を入れて取り除く。
+出走前のレースと本番は、その日の馬場差（day_variants.csv）を差し引いて補正する。
+馬場差が求まっていない走は使わない。必要な開催日は --days で書き出し、
+correct_speed.py に渡して集めておく。年ごとの違いは、念のため年ごとの定数でも取り除く。
 
 使い方:
-    python3 calibrate_pedigree.py 202608040911   # 先に correct_speed.py と stamina.py を実行しておく
+    python3 calibrate_pedigree.py 202608040911 --days > days.txt   # 必要な開催日を書き出す
+    python3 correct_speed.py 202608040911 @days.txt                 # その日の馬場差を求める
+    python3 calibrate_pedigree.py 202608040911
 
 出力:
     data/<race_id>/pedigree_calibration.csv   過去の出走馬ごとの値
@@ -51,37 +53,61 @@ def rel(pace, birth_year, date, effects, base_pace):
     return pace - age_effect - base_pace
 
 
-def collect(base, effects):
-    rows = []
+GOING = {"稍": "稍重", "不": "不良"}
+
+
+def histories():
+    """過去の菊花賞ごとに (race_id, 出走馬, その馬の菊花賞の行, 菊花賞より前の芝の走（新しい順）)。"""
     for race_id in PAST_RACES:
-        runners = netkeiba.race_runners(race_id)
-        print(f"{race_id}: {len(runners)}頭", flush=True)
-        for horse_id, name, finish, sec, odds in runners:
-            birth = int(horse_id[:4])
+        for horse_id, name, finish, sec, odds in netkeiba.race_runners(race_id):
             history = netkeiba.horse_results(horse_id, cache=True)
             own = next((r for r in history if r["race_id"] == race_id), None)
             if own is None:
                 continue
-            prior = []
-            for r in history:
-                venue = netkeiba.VENUES.get(r["race_id"][4:6])
-                if r["date"] >= own["date"] or r["surface"] != "芝" or venue is None:
-                    continue
-                b = course_base(base, venue, r["distance"])
-                if b is not None:
-                    pace = netkeiba.to_seconds(r["time"]) / r["distance"] * 1000
-                    prior.append((r["date"], rel(pace, birth, r["date"], effects, b), r["distance"]))
-            prior.sort(reverse=True)
-            if len(prior) < BEST:
-                continue
-            best = sorted(prior[:RECENT], key=lambda p: p[1])[:BEST]
-            rows.append({
-                "year": own["date"][:4], "race_id": race_id, "name": name, "finish": finish, "odds": odds,
-                "level": round(float(np.mean([p[1] for p in best])), 3),
-                "rel_kikka": round(rel(sec / 3, birth, own["date"], effects, base[TARGET_COURSE]), 3),
-                "longest_before": max(p[2] for p in prior),
-                **pedigree.pedigree(horse_id),
-            })
+            prior = sorted((r for r in history if r["date"] < own["date"] and r["surface"] == "芝"
+                            and r["race_id"][4:6] in netkeiba.VENUES), key=lambda r: r["date"], reverse=True)
+            yield race_id, (horse_id, name, finish, sec, odds), own, prior
+
+
+def needed_days():
+    """馬場差を求めるのに必要な (競馬場コード, YYYYMMDD)。"""
+    days = set()
+    for race_id, _, own, prior in histories():
+        days.add((race_id[4:6], own["date"].replace("/", "")))
+        for r in prior[:RECENT]:
+            days.add((r["race_id"][4:6], r["date"].replace("/", "")))
+    return sorted(days)
+
+
+def collect(base, effects, day, races):
+    rows = []
+    for race_id, (horse_id, name, finish, sec, odds), own, prior in histories():
+        birth = int(horse_id[:4])
+
+        def corrected_rel(r, sec_total):
+            """馬場差を除いた rel。馬場差かコースの基準が分からなければ None。"""
+            venue = netkeiba.VENUES[r["race_id"][4:6]]
+            key = (r["date"].replace("/", ""), venue, GOING.get(r["going"], r["going"]))
+            known = races.get(r["race_id"])
+            b = base.get(known["course"]) if known else course_base(base, venue, r["distance"])
+            if key not in day or b is None:
+                return None
+            pace = sec_total / r["distance"] * 1000 - day[key]
+            return rel(pace, birth, r["date"], effects, b)
+
+        recent = [(r["date"], corrected_rel(r, netkeiba.to_seconds(r["time"])), r["distance"]) for r in prior[:RECENT]]
+        recent = [p for p in recent if p[1] is not None]
+        rel_kikka = corrected_rel(own, sec)
+        if len(recent) < BEST or rel_kikka is None:
+            continue
+        best = sorted(recent, key=lambda p: p[1])[:BEST]
+        rows.append({
+            "year": own["date"][:4], "race_id": race_id, "name": name, "finish": finish, "odds": odds,
+            "level": round(float(np.mean([p[1] for p in best])), 3),
+            "rel_kikka": round(rel_kikka, 3),
+            "longest_before": max(r["distance"] for r in prior),
+            **pedigree.pedigree(horse_id),
+        })
     return rows
 
 
@@ -108,7 +134,11 @@ def main(race_id):
     out = os.path.join("data", race_id)
     base = {b["course"]: float(b["baseline_sec_per_1000m"]) for b in read(os.path.join(out, "baseline.csv"))}
     effects = {(e["kind"], e["key"]): float(e["sec_per_1000m"]) for e in read(os.path.join(out, "effects.csv"))}
-    rows = collect(base, effects)
+    day = {(d["date"], d["venue"], d["going"]): float(d["sec_per_1000m"])
+           for d in read(os.path.join(out, "day_variants.csv"))}
+    races = {r["race_id"]: {"course": f"{r['venue']}芝{r['inout']}{r['distance']}"}
+             for r in read(os.path.join(out, "races.csv"))}
+    rows = collect(base, effects, day, races)
     with open(os.path.join(out, "pedigree_calibration.csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
@@ -127,4 +157,8 @@ def main(race_id):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    if "--days" in sys.argv:
+        for venue, date in needed_days():
+            print(f"{venue}:{date}")
+    else:
+        main(sys.argv[1])

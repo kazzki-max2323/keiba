@@ -12,12 +12,14 @@
 使い方:
     python3 correct_speed.py 202608040911   # 先に fetch_race.py を実行しておく
     python3 correct_speed.py 202608040911 08:20241020,08:20231022   # 基準を固めたい開催日を足す
+    python3 correct_speed.py 202608040911 @days.txt                 # 足す開催日をファイルで渡す
 
 出力:
     data/<race_id>/runs_corrected.csv     1走ごとの補正後の値
     data/<race_id>/summary_corrected.csv  馬ごとのまとめ
     data/<race_id>/baseline.csv           コース・距離ごとの基準タイム
     data/<race_id>/day_variants.csv       開催日ごとの馬場差
+    data/<race_id>/races.csv              集めたレースの条件と勝ち時計
 """
 import collections
 import csv
@@ -153,6 +155,8 @@ def main(race_id, extra_days=()):
             w.writeheader()
             w.writerows(rows)
 
+    write("races.csv", [{k: r[k] for k in ("race_id", "date", "venue", "inout", "distance", "going",
+                                           "level", "age", "win_time")} for r in races])
     write("runs_corrected.csv", corrected)
     write("summary_corrected.csv", summary)
     write("baseline.csv", [{"course": f"{v}芝{io}{d}", "races": counts[(v, io, d)],
@@ -168,6 +172,11 @@ def main(race_id, extra_days=()):
 
 
 if __name__ == "__main__":
-    # 追加の開催日は「競馬場コード:YYYYMMDD」をカンマ区切りで渡す（例: 08:20241020,08:20231022）
-    extra = [tuple(x.split(":")) for x in sys.argv[2].split(",")] if len(sys.argv) > 2 else []
+    # 追加の開催日は「競馬場コード:YYYYMMDD」をカンマ区切りで渡す（例: 08:20241020,08:20231022）。
+    # 「@ファイル名」なら、そのファイルの1行1件を読む。
+    arg = sys.argv[2] if len(sys.argv) > 2 else ""
+    if arg.startswith("@"):
+        with open(arg[1:]) as f:
+            arg = ",".join(line.strip() for line in f if line.strip())
+    extra = [tuple(x.split(":")) for x in arg.split(",")] if arg else []
     main(sys.argv[1], extra)
