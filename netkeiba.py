@@ -204,3 +204,29 @@ def race_runs(race_id):
                          "body": int(body.group(1)) if body else None,
                          "body_change": int(body.group(2)) if body else None})
     return runs
+
+
+PAY_TYPES = ("単勝", "複勝", "枠連", "馬連", "ワイド", "馬単", "三連複", "三連単")
+
+
+def payouts(race_id):
+    """払戻金 {券種: [(馬番の組, 100円あたりの払戻金), ...]}。馬単・三連単の組は着順どおり、それ以外は小さい順。"""
+    s = get(f"https://db.netkeiba.com/race/{race_id}/", "euc-jp", cache=True)
+    result = {}
+    for table in re.findall(r'<table[^>]*pay_table_01.*?</table>', s, re.S):
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.S):
+            th = re.search(r"<th[^>]*>(.*?)</th>", tr, re.S)
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+            kind = text(th.group(1)) if th else ""
+            if kind not in PAY_TYPES or len(tds) < 2:
+                continue
+            combos = [x for x in re.split(r"<br\s*/?>", tds[0]) if text(x)]
+            pays = [x for x in re.split(r"<br\s*/?>", tds[1]) if text(x)]
+            items = []
+            for c, p in zip(combos, pays):
+                nums = tuple(int(n) for n in re.findall(r"\d+", text(c)))
+                if kind not in ("馬単", "三連単"):
+                    nums = tuple(sorted(nums))
+                items.append((nums, int(text(p).replace(",", ""))))
+            result[kind] = items
+    return result
