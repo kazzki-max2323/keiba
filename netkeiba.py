@@ -230,3 +230,28 @@ def payouts(race_id):
                 items.append((nums, int(text(p).replace(",", ""))))
             result[kind] = items
     return result
+
+
+ODDS_TYPES = {"単勝": 1, "複勝": 2, "枠連": 3, "馬連": 4, "ワイド": 5, "馬単": 6, "三連複": 7, "三連単": 8}
+
+
+def final_odds(race_id, kind):
+    """確定後のレースの全組み合わせのオッズ {馬番の組: オッズ}。馬単・三連単は着順どおり、それ以外は小さい順。
+
+    発売前・発売中のレースは中身が変わるので保存しない。
+    """
+    import json
+    t = ODDS_TYPES[kind]
+    url = f"https://race.netkeiba.com/api/api_get_jra_odds.html?race_id={race_id}&type={t}&action=init"
+    data = json.loads(get(url, "utf-8", cache=True))
+    if data.get("status") != "result":
+        path = os.path.join(CACHE, hashlib.md5(url.encode()).hexdigest() + ".html")
+        if os.path.exists(path):
+            os.remove(path)
+        return {}
+    odds = {}
+    for key, v in ((data.get("data") or {}).get("odds") or {}).get(str(t), {}).items():
+        value = float(v[0].replace(",", "")) if re.fullmatch(r"[\d,]+(\.\d+)?", v[0]) else 0.0
+        if value > 0:
+            odds[tuple(int(key[i:i + 2]) for i in range(0, len(key), 2))] = value
+    return odds
